@@ -90,10 +90,10 @@ def parse_args():
 
     group = parser.add_argument_group(title="Prometheus Exporter Options")
 
-    group.add_argument("-k",
-                       "--skip-query",
-                       action="store_true",
-                       help="Skip querying for prior sample write point in history modes")
+    # group.add_argument("-k",
+    #                    "--skip-query",
+    #                    action="store_true",
+    #                    help="Skip querying for prior sample write point in history modes")
 
     group.add_argument("-d",
                        "--debug",
@@ -106,22 +106,12 @@ def parse_args():
                        default=int(DEFAULT_PORT),
                        help="Exporter Port : " +
                        str(DEFAULT_PORT))
-
+    
     opts = dish_common.run_arg_parser(parser)
 
     if (opts.history_stats_mode or opts.status_mode) and opts.bulk_mode and not opts.verbose:
         parser.error("bulk_history cannot be combined with other modes for CSV output")
 
-    # Technically possible, but a pain to implement, so just disallow it. User
-    # probably doesn't realize how weird it would be, anyway, given that stats
-    # data reports at a different rate from status data in this case.
-    if opts.history_stats_mode and opts.status_mode and not opts.verbose and opts.poll_loops > 1:
-        parser.error("usage of --poll-loops with history stats modes cannot be mixed with status "
-                     "modes for CSV output")
-
-    opts.skip_query |= opts.no_counter | opts.verbose
-    # if opts.out_file == "-":
-    #     opts.no_stdout_errors = True
 
     return opts
 
@@ -139,7 +129,7 @@ def set_metrics (id, metrics_data, metrics, registry):
         return(False)
     
     if not 'info' in metrics:
-        metrics['info'] = Info(f'{STARLINK_NAME}_info', 'Starlink Info', ['id'], registry=registry)
+        metrics['info'] = Info(f'{STARLINK_NAME}', 'Starlink Info', ['id'], registry=registry)
     
     if not 'state' in metrics:
         metrics['state'] = Enum(f'{STARLINK_NAME}_status', 'Starlink Status', ['id'], states=CONNECTION_STATES, registry=registry)
@@ -232,7 +222,7 @@ def main():
     rc = 0
     
     registry = CollectorRegistry()
-    print (opts)
+
     start_http_server(opts.exporter_port, registry=registry)
     
     
