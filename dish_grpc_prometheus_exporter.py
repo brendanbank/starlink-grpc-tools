@@ -20,15 +20,21 @@ import time
 
 import dish_common
 import starlink_grpc
+import queue
 
 
 from prometheus_client import (Enum, Histogram, ProcessCollector, CollectorRegistry,
                                start_http_server, Gauge, Info,
                                generate_latest)
+from prometheus_client.metrics_core import GaugeMetricFamily
+
 
 log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 9148
+
+metrics_queue = queue.Queue()
+
 
 CONNECTION_STATES = ["UNKNOWN", "CONNECTED", "BOOTING", "SEARCHING", "STOWED",
     "THERMAL_SHUTDOWN", "SLEEPING", "NO_SATS", "OBSTRUCTED", "NO_DOWNLINK", "NO_PINGS"]
@@ -116,7 +122,7 @@ def parse_args():
     return opts
 
 
-def set_metrics (id, metrics_data, metrics, registry):
+def set_metrics (id, metrics_data, metrics, time_metrics, registry):
         
     if len(metrics_data) == 0:
         return (False)
@@ -135,6 +141,7 @@ def set_metrics (id, metrics_data, metrics, registry):
         metrics['state'] = Enum(f'{STARLINK_NAME}_status', 'Starlink Status', ['id'], states=CONNECTION_STATES, registry=registry)
 
     for metric in metrics_data.keys():
+        log.debug(f'metric {metric}')
         if type(metrics_data[metric]['value']) == str and  metric != 'id':
             info_metrics[metric] = metrics_data[metric]['value']
              
@@ -151,9 +158,7 @@ def set_metrics (id, metrics_data, metrics, registry):
         
         
     metrics['info'].labels(id).info(info_metrics)
-    
 
-                                                      
 def loop_body(opts, gstate, metrics, registry, shutdown=False):
     metrics_data = {}
     starlink_id = None
@@ -187,25 +192,53 @@ def loop_body(opts, gstate, metrics, registry, shutdown=False):
                                                   cb_data_add_sequence,
                                                   add_bulk=cb_add_bulk,
                                                   flush_history=shutdown)
+    
+    
+    log.debug(f'retun code: rc {rc} ')
+    if (status_ts is None or hist_ts is None):
+        log.debug(f'status_ts {status_ts} hist_ts {hist_ts}')
+    
+    
+    time_metrics =  {"rc": rc, "status_ts": status_ts, "hist_ts": hist_ts}
+    
+    log.debug(f'metrics_data {metrics_data}')
+    
     if metrics_data and 'id' in metrics_data:
 
-        for field in metrics_data.keys():
-            log.debug(f'{field} = {metrics_data[field]}')
+        # for field in metrics_data.keys():
+        #     log.debug(f'{field} = {metrics_data[field]}')
 
         log.debug (f'starlink_id = {metrics_data["id"]["value"]}')
         
         starlink_id = metrics_data["id"]["value"]
         
-        set_metrics (starlink_id, metrics_data, metrics, registry)
+        # set_metrics (starlink_id, metrics_data, metrics, time_metrics, registry)
+        
+        # metrics_queue.put({"metrics_data": metrics_data, "time_metrics": time_metrics})
+        
     log.debug(f'rc = {rc}')
     return rc
 
+class StarlinkCollector(object):
+    def __init__(self, metrics):
+        self.medians = {}
+        self.metrics = metrics
+        self.test = {}
+        
+        self.test['info'] = GaugeMetricFamily ('test_value', 'test information', labels=['id'], )
+        
+    def collect(self):
+        log.debug(f'collector called')
+        self.test['info'].add_metric(['starlink'], 1, int(time.time()))
+        self.test['info'].add_metric(['starlink'], 2, int(time.time() + 1))
+        yield (self.test['info'])
+        
 
 def main():
     opts = parse_args()
     
     opts.numeric = True
-    opts.samples = 1
+    # opts.samples = 1
     opts.loop_interval = 4
     metrics = {}
         
@@ -222,6 +255,7 @@ def main():
     rc = 0
     
     registry = CollectorRegistry()
+    registry.register(StarlinkCollector(metrics))
 
     start_http_server(opts.exporter_port, registry=registry)
     
