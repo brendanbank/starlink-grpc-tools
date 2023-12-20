@@ -1,0 +1,13 @@
+[Unit]
+Description=Starlink GRPC to Prometheus exporter
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/starlink-grpc-tools/
+EnvironmentFile=/etc/default/starlink
+ExecStart=/usr/local/starlink-grpc-tools/venv/bin/python3 dish_grpc_prometheus_exporter.py $ARGV
+
+[Install]
+WantedBy=multi-user.target
+
