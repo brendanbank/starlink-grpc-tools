@@ -108,12 +108,12 @@ def parse_args():
     
     group.add_argument("-p",
                        "--exporter-port",
-                       type=float,
+                       type=int,
                        default=int(DEFAULT_PORT),
                        help="Exporter Port : " +
                        str(DEFAULT_PORT))
     
-    opts = dish_common.run_arg_parser(parser)
+    opts = dish_common.run_arg_parser(parser, modes=['status', 'obstruction_detail', 'alert_detail', 'location', 'ping_drop', 'usage'])
 
     if (opts.history_stats_mode or opts.status_mode) and opts.bulk_mode and not opts.verbose:
         parser.error("bulk_history cannot be combined with other modes for CSV output")
