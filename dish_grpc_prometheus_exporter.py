@@ -22,12 +22,10 @@ import dish_common
 import starlink_grpc
 import queue
 
-
 from prometheus_client import (Enum, Histogram, ProcessCollector, CollectorRegistry,
                                start_http_server, Gauge, Info,
                                generate_latest)
-from prometheus_client.metrics_core import ( GaugeMetricFamily, InfoMetricFamily)
-
+from prometheus_client.metrics_core import (GaugeMetricFamily, InfoMetricFamily)
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +33,9 @@ DEFAULT_PORT = 9148
 
 metrics_queue = queue.Queue()
 
-
 CONNECTION_STATES = ["UNKNOWN", "CONNECTED", "BOOTING", "SEARCHING", "STOWED",
     "THERMAL_SHUTDOWN", "SLEEPING", "NO_SATS", "OBSTRUCTED", "NO_DOWNLINK", "NO_PINGS"]
+
 STARLINK_NAME = "starlink"
 COUNTER_FIELD = "end_counter"
 VERBOSE_FIELD_MAP = {
@@ -110,14 +108,13 @@ def parse_args():
                        "--exporter-port",
                        type=int,
                        default=int(DEFAULT_PORT),
-                       help="Exporter Port : " +
+                       help="Exporter Port : " + 
                        str(DEFAULT_PORT))
     
     opts = dish_common.run_arg_parser(parser, modes=['status', 'obstruction_detail', 'alert_detail', 'location', 'ping_drop', 'usage'])
 
     if (opts.history_stats_mode or opts.status_mode) and opts.bulk_mode and not opts.verbose:
         parser.error("bulk_history cannot be combined with other modes for CSV output")
-
 
     return opts
 
@@ -131,7 +128,7 @@ def loop_body(opts, gstate, shutdown=False):
     def iform(val):
         if val is None:
             return 0
-        elif( val is True):
+        elif(val is True):
             return 1
         elif(val is False):
             return 0
@@ -156,13 +153,11 @@ def loop_body(opts, gstate, shutdown=False):
                                                   add_bulk=cb_add_bulk,
                                                   flush_history=shutdown)
     
-    
     log.debug(f'retun code: rc {rc} ')
     if (status_ts is None or hist_ts is None):
         log.debug(f'status_ts {status_ts} hist_ts {hist_ts}')
     
-    
-    time_metrics =  {"rc": rc, "status_ts": status_ts, "hist_ts": hist_ts}
+    time_metrics = {"rc": rc, "status_ts": status_ts, "hist_ts": hist_ts}
     
     # log.debug(f'metrics_data {metrics_data}')
     
@@ -177,6 +172,7 @@ def loop_body(opts, gstate, shutdown=False):
 
 
 class StarlinkCollector(object):
+
     def __init__(self):
         pass
         
@@ -185,9 +181,8 @@ class StarlinkCollector(object):
         
         metrics = self.set_metrics_family()
         
-        for metric in metrics.keys():            
+        for metric in metrics.keys(): 
             yield (metrics[metric])
-
         
     def set_metrics_family (self):
     
@@ -226,7 +221,6 @@ class StarlinkCollector(object):
         
                     if not 'info' in return_metrics:
                         return_metrics['info'] = InfoMetricFamily(f'{STARLINK_NAME}', 'Starlink Info', labels=['id'])
-
             
             return_metrics['info'].add_metric(labels=[id], value=info_metrics, timestamp=time_metrics['status_ts'])
             
@@ -234,7 +228,6 @@ class StarlinkCollector(object):
                 return_metrics['state'] = GaugeMetricFamily(name=f'{STARLINK_NAME}_status',
                                                 documentation=metrics_data['state']['text'],
                                                 labels=['id', 'starlink_status'])
-                    
 
             log.debug (f"state: {metrics_data['state']['value']}")                    
                 
@@ -243,11 +236,8 @@ class StarlinkCollector(object):
                                 timestamp=time_metrics['status_ts']) 
                                 for i, s
                                 in enumerate(CONNECTION_STATES) ]
-
-            
             
             log.debug(f'status_ts = {time_metrics["status_ts"]}')
-            
             
         return(return_metrics)
     
@@ -274,7 +264,6 @@ def main():
     registry.register(StarlinkCollector())
 
     start_http_server(opts.exporter_port, registry=registry)
-    
     
     try:
         next_loop = time.monotonic()
