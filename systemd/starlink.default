@@ -1,0 +1,6 @@
+INFLUXDB_URL=http://srv1.bgwlan.nl:8086
+INFLUXDB_TOKEN="hS3al7MtavngmQZFZFoXTL71Gz4HVLku1GdrEc3CPeDw2Gl2urKDKgzY2fTQKoM40Y82v-qJRf2qHKj7a8cc-w=="
+INFLUXDB_Bucket=starlink
+INFLUXDB_ORG=bgwlan
+
+ARGV="-t 10 status obstruction_detail alert_detail location ping_drop usage"
