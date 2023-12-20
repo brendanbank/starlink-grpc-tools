@@ -186,7 +186,6 @@ class StarlinkCollector(object):
         
     def set_metrics_family (self):
     
-        # self.test['info'] = GaugeMetricFamily ('test_value', 'test information', labels=['id'])
         return_metrics = {}
         
         while not metrics_queue.empty():
@@ -198,16 +197,12 @@ class StarlinkCollector(object):
             info_metrics = {}
 
             log.debug(f'id {id}')
-        
-            # create info and state
-
-            # if not 'state' in metrics:
-            #     metrics['state'] = GaugeMetricFamily(f'{STARLINK_NAME}_status', 'Starlink Status', labels=['id'])
-                
+                        
             for metric in metrics_data.keys():
                 # log.debug(f'metric {metric}')
                 if type(metrics_data[metric]['value']) == str and  metric != 'id':
                     info_metrics[metric] = metrics_data[metric]['value']
+                    continue
                     
                 if type(metrics_data[metric]['value']) == float or type(metrics_data[metric]['value']) == int:
                     if not metric in return_metrics:
@@ -219,8 +214,8 @@ class StarlinkCollector(object):
                                         value=metrics_data[metric]['value'],
                                         timestamp=time_metrics['status_ts'])
         
-                    if not 'info' in return_metrics:
-                        return_metrics['info'] = InfoMetricFamily(f'{STARLINK_NAME}', 'Starlink Info', labels=['id'])
+            if not 'info' in return_metrics:
+                return_metrics['info'] = InfoMetricFamily(f'{STARLINK_NAME}', 'Starlink Info', labels=['id'])
             
             return_metrics['info'].add_metric(labels=[id], value=info_metrics, timestamp=time_metrics['status_ts'])
             
@@ -228,17 +223,13 @@ class StarlinkCollector(object):
                 return_metrics['state'] = GaugeMetricFamily(name=f'{STARLINK_NAME}_status',
                                                 documentation=metrics_data['state']['text'],
                                                 labels=['id', 'starlink_status'])
-
-            log.debug (f"state: {metrics_data['state']['value']}")                    
                 
             [ return_metrics['state'].add_metric(labels=[id, s],
                                 value=1 if metrics_data['state']['value'] == s else 0,
                                 timestamp=time_metrics['status_ts']) 
                                 for i, s
                                 in enumerate(CONNECTION_STATES) ]
-            
-            log.debug(f'status_ts = {time_metrics["status_ts"]}')
-            
+                        
         return(return_metrics)
     
 
@@ -268,8 +259,8 @@ def main():
     try:
         next_loop = time.monotonic()
         while True:
+            log.debug('run loop_body')
             rc = loop_body(opts, gstate)
-
             if opts.loop_interval > 0.0:
                 now = time.monotonic()
                 next_loop = max(next_loop + opts.loop_interval, now)
