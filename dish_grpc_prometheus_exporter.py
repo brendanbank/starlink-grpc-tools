@@ -257,8 +257,6 @@ def main():
     opts = parse_args()
     
     opts.numeric = True
-    # opts.samples = 1
-    opts.loop_interval = 4
     metrics = {}
         
     logging.basicConfig(format="%(levelname)s: %(message)s")
@@ -283,7 +281,7 @@ def main():
         next_loop = time.monotonic()
         while True:
             rc = loop_body(opts, gstate, metrics, registry)
-            # rc = loop_body(opts, gstate, print_file)
+
             if opts.loop_interval > 0.0:
                 now = time.monotonic()
                 next_loop = max(next_loop + opts.loop_interval, now)
