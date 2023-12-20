@@ -26,7 +26,7 @@ import queue
 from prometheus_client import (Enum, Histogram, ProcessCollector, CollectorRegistry,
                                start_http_server, Gauge, Info,
                                generate_latest)
-from prometheus_client.metrics_core import GaugeMetricFamily
+from prometheus_client.metrics_core import ( GaugeMetricFamily, InfoMetricFamily)
 
 
 log = logging.getLogger(__name__)
@@ -122,43 +122,6 @@ def parse_args():
     return opts
 
 
-def set_metrics (id, metrics_data, metrics, time_metrics, registry):
-        
-    if len(metrics_data) == 0:
-        return (False)
-    
-    info_metrics = {}
-
-    log.debug(f'id {id}')
-    if (not id):
-        log.debug(f'metrics_data does not have "id" (starlink uuid)')
-        return(False)
-    
-    if not 'info' in metrics:
-        metrics['info'] = Info(f'{STARLINK_NAME}', 'Starlink Info', ['id'], registry=registry)
-    
-    if not 'state' in metrics:
-        metrics['state'] = Enum(f'{STARLINK_NAME}_status', 'Starlink Status', ['id'], states=CONNECTION_STATES, registry=registry)
-
-    for metric in metrics_data.keys():
-        log.debug(f'metric {metric}')
-        if type(metrics_data[metric]['value']) == str and  metric != 'id':
-            info_metrics[metric] = metrics_data[metric]['value']
-             
-        if type(metrics_data[metric]['value']) == float or type(metrics_data[metric]['value']) == int:
-            if metric in metrics:
-                metrics[metric].labels(id).set(metrics_data[metric]['value'])
-                continue
-
-            metrics[metric] = Gauge(f'{STARLINK_NAME}_{metric}', metrics_data[metric]['text'], ['id'], registry=registry)
-            metrics[metric].labels(id).set(metrics_data[metric]['value'])
-    
-    if 'state' in metrics_data:
-        metrics['state'].labels(id).state(metrics_data['state']['value'])
-        
-        
-    metrics['info'].labels(id).info(info_metrics)
-
 def loop_body(opts, gstate, metrics, registry, shutdown=False):
     metrics_data = {}
     starlink_id = None
@@ -201,38 +164,94 @@ def loop_body(opts, gstate, metrics, registry, shutdown=False):
     
     time_metrics =  {"rc": rc, "status_ts": status_ts, "hist_ts": hist_ts}
     
-    log.debug(f'metrics_data {metrics_data}')
+    # log.debug(f'metrics_data {metrics_data}')
     
     if metrics_data and 'id' in metrics_data:
-
-        # for field in metrics_data.keys():
-        #     log.debug(f'{field} = {metrics_data[field]}')
-
         log.debug (f'starlink_id = {metrics_data["id"]["value"]}')
         
         starlink_id = metrics_data["id"]["value"]
         
         # set_metrics (starlink_id, metrics_data, metrics, time_metrics, registry)
+        metrics_queue.put({"metrics_data": metrics_data, "time_metrics": time_metrics})
         
-        # metrics_queue.put({"metrics_data": metrics_data, "time_metrics": time_metrics})
-        
-    log.debug(f'rc = {rc}')
     return rc
 
+
 class StarlinkCollector(object):
-    def __init__(self, metrics):
-        self.medians = {}
-        self.metrics = metrics
-        self.test = {}
-        
-        self.test['info'] = GaugeMetricFamily ('test_value', 'test information', labels=['id'], )
+    def __init__(self):
+        pass
         
     def collect(self):
         log.debug(f'collector called')
-        self.test['info'].add_metric(['starlink'], 1, int(time.time()))
-        self.test['info'].add_metric(['starlink'], 2, int(time.time() + 1))
-        yield (self.test['info'])
         
+        metrics = self.set_metrics_family()
+        
+        for metric in metrics.keys():            
+            yield (metrics[metric])
+
+        
+    def set_metrics_family (self):
+    
+        # self.test['info'] = GaugeMetricFamily ('test_value', 'test information', labels=['id'])
+        return_metrics = {}
+        
+        while not metrics_queue.empty():
+            metrics = metrics_queue.get()
+            
+            metrics_data = metrics['metrics_data']
+            time_metrics = metrics['time_metrics']
+            id = metrics_data['id']['value']
+            info_metrics = {}
+
+            log.debug(f'id {id}')
+        
+            # create info and state
+
+            # if not 'state' in metrics:
+            #     metrics['state'] = GaugeMetricFamily(f'{STARLINK_NAME}_status', 'Starlink Status', labels=['id'])
+                
+            for metric in metrics_data.keys():
+                # log.debug(f'metric {metric}')
+                if type(metrics_data[metric]['value']) == str and  metric != 'id':
+                    info_metrics[metric] = metrics_data[metric]['value']
+                    
+                if type(metrics_data[metric]['value']) == float or type(metrics_data[metric]['value']) == int:
+                    if not metric in return_metrics:
+                        return_metrics[metric] = GaugeMetricFamily(name=f'{STARLINK_NAME}_{metric}',
+                                                        documentation=metrics_data[metric]['text'],
+                                                        labels=['id'])
+                    
+                    return_metrics[metric].add_metric(labels=[id],
+                                        value=metrics_data[metric]['value'],
+                                        timestamp=time_metrics['status_ts'])
+        
+                    if not 'info' in return_metrics:
+                        return_metrics['info'] = InfoMetricFamily(f'{STARLINK_NAME}', 'Starlink Info', labels=['id'])
+
+            
+            return_metrics['info'].add_metric(labels=[id], value=info_metrics, timestamp=time_metrics['status_ts'])
+            
+            if not 'state' in return_metrics:
+                return_metrics['state'] = GaugeMetricFamily(name=f'{STARLINK_NAME}_status',
+                                                documentation=metrics_data['state']['text'],
+                                                labels=['id', 'starlink_status'])
+                    
+
+            log.debug (f"state: {metrics_data['state']['value']}")                    
+                
+            [ return_metrics['state'].add_metric(labels=[id, s],
+                                value=1 if metrics_data['state']['value'] == s else 0,
+                                timestamp=time_metrics['status_ts']) 
+                                for i, s
+                                in enumerate(CONNECTION_STATES) ]
+
+            
+            
+            log.debug(f'status_ts = {time_metrics["status_ts"]}')
+            
+            
+        return(return_metrics)
+    
 
 def main():
     opts = parse_args()
@@ -255,7 +274,7 @@ def main():
     rc = 0
     
     registry = CollectorRegistry()
-    registry.register(StarlinkCollector(metrics))
+    registry.register(StarlinkCollector())
 
     start_http_server(opts.exporter_port, registry=registry)
     
