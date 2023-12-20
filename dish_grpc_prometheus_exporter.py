@@ -122,7 +122,7 @@ def parse_args():
     return opts
 
 
-def loop_body(opts, gstate, metrics, registry, shutdown=False):
+def loop_body(opts, gstate, shutdown=False):
     metrics_data = {}
     starlink_id = None
 
@@ -171,7 +171,6 @@ def loop_body(opts, gstate, metrics, registry, shutdown=False):
         
         starlink_id = metrics_data["id"]["value"]
         
-        # set_metrics (starlink_id, metrics_data, metrics, time_metrics, registry)
         metrics_queue.put({"metrics_data": metrics_data, "time_metrics": time_metrics})
         
     return rc
@@ -280,7 +279,7 @@ def main():
     try:
         next_loop = time.monotonic()
         while True:
-            rc = loop_body(opts, gstate, metrics, registry)
+            rc = loop_body(opts, gstate)
 
             if opts.loop_interval > 0.0:
                 now = time.monotonic()
@@ -291,7 +290,7 @@ def main():
     except (KeyboardInterrupt, Terminated):
         pass
     finally:
-        loop_body(opts, gstate, metrics, registry, shutdown=True)
+        loop_body(opts, gstate, shutdown=True)
         gstate.shutdown()    
     
     sys.exit(rc)
