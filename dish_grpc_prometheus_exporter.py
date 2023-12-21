@@ -11,30 +11,25 @@ order in the output can change with the dish software. Instead of using
 the alert_detail mode, you can use the alerts bitmask in the status group.
 """
 
-from datetime import datetime
 import logging
-import os
 import signal
 import sys
 import time
 
 import dish_common
-import starlink_grpc
 import queue
 
-from prometheus_client import (Enum, Histogram, ProcessCollector, CollectorRegistry,
-                               start_http_server, Gauge, Info,
-                               generate_latest)
+from prometheus_client import (CollectorRegistry, start_http_server)
 from prometheus_client.metrics_core import (GaugeMetricFamily, InfoMetricFamily)
 
 log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 9148
 
-metrics_queue = queue.Queue()
+
 
 CONNECTION_STATES = ["UNKNOWN", "CONNECTED", "BOOTING", "SEARCHING", "STOWED",
-    "THERMAL_SHUTDOWN", "SLEEPING", "NO_SATS", "OBSTRUCTED", "NO_DOWNLINK", "NO_PINGS"]
+    "THERMAL_SHUTDOWN", "SLEEPING", "NO_SATS", "OBSTRUCTED", "NO_DOWNLINK", "NO_PINGS", "NO_CONNECTION_WITH_DISH"]
 
 STARLINK_NAME = "starlink"
 COUNTER_FIELD = "end_counter"
@@ -86,18 +81,11 @@ def handle_sigterm(signum, frame):
 
 
 def parse_args():
-    # parser = dish_common.create_arg_parser(
-    #     output_description="print it in text format; by default, will print in CSV format")
 
     parser = dish_common.create_arg_parser(output_description="Prometheus exporter",
                                            bulk_history=False)
 
     group = parser.add_argument_group(title="Prometheus Exporter Options")
-
-    # group.add_argument("-k",
-    #                    "--skip-query",
-    #                    action="store_true",
-    #                    help="Skip querying for prior sample write point in history modes")
 
     group.add_argument("-d",
                        "--debug",
@@ -118,78 +106,27 @@ def parse_args():
 
     return opts
 
-
-def loop_body(opts, gstate, shutdown=False):
-    metrics_data = {}
-    starlink_id = None
-
-    log.debug(f'loop_body started')
-
-    def iform(val):
-        if val is None:
-            return 0
-        elif(val is True):
-            return 1
-        elif(val is False):
-            return 0
-        else:
-            return (val)
-
-    def cb_data_add_item(name, val, category):
-        metrics_data[name] = {'value': iform(val),
-                    'text': VERBOSE_FIELD_MAP.get(name, name),
-                    'category': category }
-            
-    def cb_data_add_sequence(name, val, category, start):
-        pass
-
-    def cb_add_bulk(bulk, count, timestamp, counter):
-        pass
-    
-    rc, status_ts, hist_ts = dish_common.get_data(opts,
-                                                  gstate,
-                                                  cb_data_add_item,
-                                                  cb_data_add_sequence,
-                                                  add_bulk=cb_add_bulk,
-                                                  flush_history=shutdown)
-    
-    log.debug(f'retun code: rc {rc} ')
-    if (status_ts is None or hist_ts is None):
-        log.debug(f'status_ts {status_ts} hist_ts {hist_ts}')
-    
-    time_metrics = {"rc": rc, "status_ts": status_ts, "hist_ts": hist_ts}
-    
-    # log.debug(f'metrics_data {metrics_data}')
-    
-    if metrics_data and 'id' in metrics_data:
-        log.debug (f'starlink_id = {metrics_data["id"]["value"]}')
-        
-        starlink_id = metrics_data["id"]["value"]
-        
-        metrics_queue.put({"metrics_data": metrics_data, "time_metrics": time_metrics})
-        
-    return rc
-
-
 class StarlinkCollector(object):
 
     def __init__(self):
+        self.last_dish_id = 'Unknown'
+        self.metrics_queue = queue.Queue()
         pass
         
     def collect(self):
         log.debug(f'collector called')
         
-        metrics = self.set_metrics_family()
+        metrics = self.set_metrics()
         
         for metric in metrics.keys(): 
             yield (metrics[metric])
         
-    def set_metrics_family (self):
+    def set_metrics (self):
     
         return_metrics = {}
         
-        while not metrics_queue.empty():
-            metrics = metrics_queue.get()
+        while not self.metrics_queue.empty():
+            metrics = self.metrics_queue.get()
             
             metrics_data = metrics['metrics_data']
             time_metrics = metrics['time_metrics']
@@ -199,7 +136,7 @@ class StarlinkCollector(object):
             log.debug(f'id {id}')
                         
             for metric in metrics_data.keys():
-                # log.debug(f'metric {metric}')
+                log.debug(f'metric {metric} metrics_data = {metrics_data[metric]}')
                 if type(metrics_data[metric]['value']) == str and  metric != 'id':
                     info_metrics[metric] = metrics_data[metric]['value']
                     continue
@@ -212,32 +149,95 @@ class StarlinkCollector(object):
                     
                     return_metrics[metric].add_metric(labels=[id],
                                         value=metrics_data[metric]['value'],
-                                        timestamp=time_metrics['status_ts'])
+                                        timestamp=time_metrics)
         
             if not 'info' in return_metrics:
                 return_metrics['info'] = InfoMetricFamily(f'{STARLINK_NAME}', 'Starlink Info', labels=['id'])
             
-            return_metrics['info'].add_metric(labels=[id], value=info_metrics, timestamp=time_metrics['status_ts'])
-            
-            if not 'state' in return_metrics:
-                return_metrics['state'] = GaugeMetricFamily(name=f'{STARLINK_NAME}_status',
-                                                documentation=metrics_data['state']['text'],
-                                                labels=['id', 'starlink_status'])
-                
-            [ return_metrics['state'].add_metric(labels=[id, s],
-                                value=1 if metrics_data['state']['value'] == s else 0,
-                                timestamp=time_metrics['status_ts']) 
-                                for i, s
-                                in enumerate(CONNECTION_STATES) ]
+            return_metrics['info'].add_metric(labels=[id], value=info_metrics, timestamp=time_metrics)
+
+            self._add_status(return_metrics,id, metrics_data['state']['value'] , time_metrics)
                         
         return(return_metrics)
     
+    def _add_status(self,return_metrics, dish_id, starlink_status,time_metrics ):
+            starlink_states = { i:s for i, s in enumerate(CONNECTION_STATES) }
+            docu = ""
+            for key, val in starlink_states.items():
+                docu = docu + f"{key} = {val}, " 
 
+            if not 'state' in return_metrics:
+                return_metrics['state'] = GaugeMetricFamily(name=f'{STARLINK_NAME}_dish_status',
+                                                documentation="Starlink Status " + docu,
+                                                labels=['id', 'status'])
+                
+            for key,value in starlink_states.items():
+                if starlink_status == value:
+                    return_metrics['state'].add_metric(labels=[dish_id, starlink_status], value=key,
+                                                       timestamp=time_metrics)
+
+    def loop_body(self, opts, gstate, shutdown=False):
+        metrics_data = {}
+    
+        log.debug(f'loop_body started')
+    
+        def iform(val):
+            if val is None:
+                return 0
+            elif(val is True):
+                return 1
+            elif(val is False):
+                return 0
+            else:
+                return (val)
+    
+        def cb_data_add_item(name, val, category):
+            metrics_data[name] = {'value': iform(val),
+                        'text': VERBOSE_FIELD_MAP.get(name, name),
+                        'category': category }
+                
+        def cb_data_add_sequence(name, val, category, start):
+            pass
+    
+        def cb_add_bulk(bulk, count, timestamp, counter):
+            pass
+        
+        rc, status_ts, hist_ts = dish_common.get_data(opts,
+                                                      gstate,
+                                                      cb_data_add_item,
+                                                      cb_data_add_sequence,
+                                                      add_bulk=cb_add_bulk,
+                                                      flush_history=shutdown)
+        
+        log.debug(f'retun code: rc {rc} ')
+        if (status_ts is None or hist_ts is None):
+            log.debug(f'status_ts {status_ts} hist_ts {hist_ts}')
+        
+        
+        # log.debug(f'metrics_data {metrics_data}')
+        
+        if rc == 0 and metrics_data and 'id' in metrics_data:
+            self.last_dish_id = metrics_data["id"]["value"]
+            log.debug (f'starlink_id = {metrics_data["id"]["value"]}')
+            self.metrics_queue.put({"metrics_data": metrics_data, "time_metrics": status_ts})
+        else:
+            metrics_data['state'] = {'value': 'NO_CONNECTION_WITH_DISH',
+                        'text': 'state',
+                        'category': 'status' }
+            
+            metrics_data['id'] = {'value': self.last_dish_id,
+                        'text': VERBOSE_FIELD_MAP.get(id, id),
+                        'category': 'status' }
+            time_metrics = int(time.time())
+            self.metrics_queue.put({"metrics_data": metrics_data, "time_metrics": time_metrics})
+
+        return rc
+    
+       
 def main():
     opts = parse_args()
     
     opts.numeric = True
-    metrics = {}
         
     logging.basicConfig(format="%(levelname)s: %(message)s")
 
@@ -252,7 +252,9 @@ def main():
     rc = 0
     
     registry = CollectorRegistry()
-    registry.register(StarlinkCollector())
+    
+    collector = StarlinkCollector()
+    registry.register(collector)
 
     start_http_server(opts.exporter_port, registry=registry)
     
@@ -260,7 +262,7 @@ def main():
         next_loop = time.monotonic()
         while True:
             log.debug('run loop_body')
-            rc = loop_body(opts, gstate)
+            rc = collector.loop_body(opts, gstate)
             if opts.loop_interval > 0.0:
                 now = time.monotonic()
                 next_loop = max(next_loop + opts.loop_interval, now)
@@ -270,7 +272,7 @@ def main():
     except (KeyboardInterrupt, Terminated):
         pass
     finally:
-        loop_body(opts, gstate, shutdown=True)
+        collector.loop_body(opts, gstate, shutdown=True)
         gstate.shutdown()    
     
     sys.exit(rc)
