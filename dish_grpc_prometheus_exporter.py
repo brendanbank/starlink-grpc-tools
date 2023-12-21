@@ -169,11 +169,11 @@ class StarlinkCollector(object):
             if not 'state' in return_metrics:
                 return_metrics['state'] = GaugeMetricFamily(name=f'{STARLINK_NAME}_dish_status',
                                                 documentation="Starlink Status " + docu,
-                                                labels=['id', 'status'])
+                                                labels=['id'])
                 
             for key,value in starlink_states.items():
                 if starlink_status == value:
-                    return_metrics['state'].add_metric(labels=[dish_id, starlink_status], value=key,
+                    return_metrics['state'].add_metric(labels=[dish_id], value=key,
                                                        timestamp=time_metrics)
 
     def loop_body(self, opts, gstate, shutdown=False):
