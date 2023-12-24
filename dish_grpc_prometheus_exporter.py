@@ -26,10 +26,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 9148
 
+CONNECTION_STATES = ["UNKNOWN", "CONNECTED", "BOOTING", "SEARCHING",
+                     "STOWED", "THERMAL_SHUTDOWN", "SLEEPING", "NO_SATS",
+                     "OBSTRUCTED", "NO_DOWNLINK", "NO_PINGS", "DISH_UNREACHABLE"]
 
-
-CONNECTION_STATES = ["UNKNOWN", "CONNECTED", "BOOTING", "SEARCHING", "STOWED",
-    "THERMAL_SHUTDOWN", "SLEEPING", "NO_SATS", "OBSTRUCTED", "NO_DOWNLINK", "NO_PINGS", "NO_CONNECTION_WITH_DISH"]
 
 STARLINK_NAME = "starlink"
 COUNTER_FIELD = "end_counter"
@@ -130,14 +130,20 @@ class StarlinkCollector(object):
             
             metrics_data = metrics['metrics_data']
             time_metrics = metrics['time_metrics']
-            id = metrics_data['id']['value']
+            dish_id = metrics_data['id']['value']
             info_metrics = {}
 
-            log.debug(f'id {id}')
+            log.debug(f'id {dish_id}')
                         
             for metric in metrics_data.keys():
+                
+                if "snr" == metric:
+                    # snr is not supported by starlink any more but still returned by the grpc
+                    # service for backwards compatibility
+                    continue
+
                 log.debug(f'metric {metric} metrics_data = {metrics_data[metric]}')
-                if type(metrics_data[metric]['value']) == str and  metric != 'id':
+                if type(metrics_data[metric]['value']) == str and  metric != 'id' and metric != 'state' :
                     info_metrics[metric] = metrics_data[metric]['value']
                     continue
                     
@@ -147,16 +153,17 @@ class StarlinkCollector(object):
                                                         documentation=metrics_data[metric]['text'],
                                                         labels=['id'])
                     
-                    return_metrics[metric].add_metric(labels=[id],
+                    return_metrics[metric].add_metric(labels=[dish_id],
                                         value=metrics_data[metric]['value'],
                                         timestamp=time_metrics)
         
             if not 'info' in return_metrics:
                 return_metrics['info'] = InfoMetricFamily(f'{STARLINK_NAME}', 'Starlink Info', labels=['id'])
             
-            return_metrics['info'].add_metric(labels=[id], value=info_metrics, timestamp=time_metrics)
-
-            self._add_status(return_metrics,id, metrics_data['state']['value'] , time_metrics)
+            return_metrics['info'].add_metric(labels=[dish_id], value=info_metrics, timestamp=time_metrics)
+            
+            if 'state' in metrics_data:
+                self._add_status(return_metrics,dish_id, metrics_data['state']['value'] , time_metrics)
                         
         return(return_metrics)
     
@@ -256,8 +263,9 @@ def main():
     collector = StarlinkCollector()
     registry.register(collector)
 
-    start_http_server(opts.exporter_port, registry=registry)
-    
+    start_http_server(opts.exporter_port, addr='::', registry=registry)
+
+
     try:
         next_loop = time.monotonic()
         while True:
